@@ -1,6 +1,6 @@
 # -- coding: utf-8 --
 
-from src.domain.node import Node
+from domain.node import Node
 
 
 class Edge:

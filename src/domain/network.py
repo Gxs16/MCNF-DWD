@@ -58,13 +58,13 @@ class Network:
         Load network and demand from a file, example file shown in ./network/*
         """
         network = pd.read_csv(network_file, sep='\t')
-        networkDf = network.to_dict("index")
-        for edgeId, edgeInfo in networkDf.items():
+        network_df = network.to_dict("index")
+        for edgeId, edgeInfo in network_df.items():
             self.add_edge(edgeId, edgeInfo['init_node'], edgeInfo['term_node'], edgeInfo['length'],
                           edgeInfo['capacity'] * 2)
         demand = pd.read_csv(demand_file, sep='\t')
-        demandDf = demand.to_dict("index")
-        for demandId, demandInfo in demandDf.items():
+        demand_df = demand.to_dict("index")
+        for demandId, demandInfo in demand_df.items():
             if demandInfo["demand"] > 1e-10:
                 self.add_demand(demandId, demandInfo["init_node"], demandInfo["term_node"], demandInfo["demand"])
 
@@ -74,7 +74,7 @@ class Network:
         """
         for node in self.nodes.values():
             node.label = float('inf')
-            node.spPred = None
+            node.shortest_path_predecessor = None
 
     def reset_edge_capacity(self):
         """
@@ -90,7 +90,3 @@ class Network:
         """
         for edge in self.edges.values():
             edge.weight = edge.initial_weight
-
-
-
-

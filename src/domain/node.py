@@ -11,7 +11,7 @@ class Node:
         self.successors: Dict[int, int] = {}  # successors in the graph
         self.predecessors: Dict[int, int] = {}  # predecessors in the graph
         self.label = float('inf')  # for Dijkstra algorithm
-        self.spPred: Union[Node, None] = None  # also for Dijkstra algorithm
+        self.shortest_path_predecessor: Union[Node, None] = None  # also for Dijkstra algorithm
 
     def __str__(self) -> str:
         return str(self.id)

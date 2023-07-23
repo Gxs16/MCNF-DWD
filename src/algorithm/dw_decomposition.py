@@ -7,13 +7,12 @@ from cplex import SparsePair
 
 from algorithm.shortest_path import dijkstra
 from domain.network import Network
-from domain.node import Node
 from domain.solution import Solution
 
 logger = logging.getLogger(__name__)
 
 
-def solve(network: Network, M=1e6, epsilon=1e-6):
+def solve(network: Network, big_m=1e8, epsilon=1e-6):
     # Find edges with upper bounded capacity: 找到有容量上界的边
     for edgeId, edge in network.edges.items():
         if edge.capacity < float('inf'):
@@ -22,55 +21,44 @@ def solve(network: Network, M=1e6, epsilon=1e-6):
     master_problem = cplex.Cplex()
     # Add variables: 添加变量，包括lambda、松弛变量和人工变量
     num_edges = len(network.bounded_edges)
-    a_index_range = master_problem.variables.add(obj=[M] * num_edges, lb=[0] * num_edges, names=['a'] * num_edges)
-    coefficients_a = [-1] * num_edges + [0]
+    s_index_range = master_problem.variables.add(obj=[big_m], lb=[0], names=['s'])
 
     capacity_index_range = master_problem.linear_constraints.add(lin_expr=[SparsePair()] * num_edges,
                                                                  senses=['L'] * num_edges,
                                                                  rhs=[network.bounded_edges[k].capacity for k in network.bounded_edges.keys()])
-    master_problem.linear_constraints.set_coefficients(list(zip(capacity_index_range, a_index_range, coefficients_a)))
 
     usage_index_range = master_problem.linear_constraints.add(lin_expr=[SparsePair()],
                                                               senses=['E'],
                                                               rhs=[1])
 
-    master_problem.objective.set_sense(master_problem.objective.sense.minimize)
+    master_problem.linear_constraints.set_coefficients(list(zip(usage_index_range, s_index_range, [1])))
 
-    # Start! 记录开始时间
     start_time = time.time()
-    # Solve the Restricted Master Problem: 求解受限主问题RMP
-
-    # Get the dual: 得到对偶变量的值
-    dual_vars = [0.0 for _ in capacity_index_range] + [1e9]
-    # Start the iteration: 迭代开始，迭代次数设置为0
     iter_num = 0
-    # Solve the Sub problem according to the dual, and find new column: 根据对偶变量的值求解子问题（SP），得到检验数，同时新的极点会添加到极点列表里
-    solution = sub_problem(network, dual_vars)
-    while solution.reduced_cost < -epsilon and iter_num < 2000:
-        network.solutions.append(solution)
-        # Calculate the coefficient of the new column: 计算该极点对应的新列的系数
-        lamb_index_range = master_problem.variables.add(obj=[solution.cost], lb=[0], ub=[1],
-                                                        names=[f'lamb_{len(network.solutions) - 1}'])
-        coefficients = [solution.flow[k] for k in network.bounded_edges.keys()]
-        for lamb_index in lamb_index_range:
-            master_problem.linear_constraints.set_coefficients(list(zip(capacity_index_range, [lamb_index] * num_edges, coefficients)))
-        for lamb_index in lamb_index_range:
-            master_problem.linear_constraints.set_coefficients(list(zip(usage_index_range, [lamb_index], [1])))
-        # Solve the Restricted Master Problem: 求解受限主问题RMP
+    while True:
         master_problem.solve()
-        # Get the dual: 得到对偶变量的值
-        dual_vars = [d for d in master_problem.solution.get_dual_values(list(capacity_index_range))] + [d for d in master_problem.solution.get_dual_values(list(usage_index_range))]
-        # Solve the Sub problem according to the dual, and find new column: 根据对偶变量的值求解子问题（SP），得到检验数，同时新的极点会添加到极点列表里
+
+        dual_vars = master_problem.solution.get_dual_values()
+
         solution = sub_problem(network, dual_vars)
-        # Output: 输出
-        iter_num += 1
+
         logger.info(f"Iter: {iter_num} | Master Problem: {master_problem.solution.get_objective_value()} | Sub Problem: {solution.reduced_cost}")
-    # End! 记录结束时间
+
+        if solution.reduced_cost < -epsilon and iter_num < 2000:
+            network.solutions.append(solution)
+            lamb_index_range = master_problem.variables.add(obj=[solution.cost], lb=[0], ub=[1],
+                                                            names=[f'lamb_{len(network.solutions) - 1}'])
+            coefficients = [solution.flow[k] for k in network.bounded_edges.keys()]
+            for lamb_index in lamb_index_range:
+                master_problem.linear_constraints.set_coefficients(list(zip(capacity_index_range, [lamb_index] * num_edges, coefficients)))
+            for lamb_index in lamb_index_range:
+                master_problem.linear_constraints.set_coefficients(list(zip(usage_index_range, [lamb_index], [1])))
+            iter_num += 1
+        else:
+            break
     end_time = time.time()
-    # Save the model: 模型保存和输出
     network.obj_model = master_problem
     logger.info("Iteration time: {:.2f}s. Objective: {:.2f}.".format(end_time - start_time, master_problem.solution.get_objective_value()))
-    # Process the final solution: 得到各OD的路径和流量信息
     display_sol(network)
 
 
@@ -148,11 +136,11 @@ def display_sol(network: Network):
             lam_idx = int(var_name[5:])
             lams[lam_idx] = var_value
     # For each demand, obtain its route(s) and the ratio of flow on the route according to lambda
-    for solId, ratio in lams.items():
-        solution = network.solutions[solId]
+    for sol_id, ratio in lams.items():
+        solution = network.solutions[sol_id]
         routes_dict = solution.routes
-        for demandId, route in routes_dict.items():
-            demand = network.demands[demandId]
+        for demand_id, route in routes_dict.items():
+            demand = network.demands[demand_id]
             demand.update_route(route, ratio)
             last_node = demand.o
             for node in route[1:]:
