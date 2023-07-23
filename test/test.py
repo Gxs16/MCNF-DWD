@@ -1,16 +1,13 @@
 # -- coding: utf-8 --
+import logging.config
+
 from algorithm.dw_decomposition import solve
 from domain.network import Network
+from logger_config import log_config_dict
+
+logging.config.dictConfig(log_config_dict)
 
 if __name__ == "__main__":
     network = Network()
     network.load_network()
     solve(network)
-    sensitivityFile = open("./output/sensitivity.txt", 'w')
-    sensitivityFile.write("m\tobj\n")
-    for m in range(15):
-        network = Network()
-        network.load_network()
-        solve(network, M=m)
-        sensitivityFile.write("{:.0f}\t{:.6f}\n".format(m, network.obj_model.solution.get_objective_value()))
-    sensitivityFile.close()
