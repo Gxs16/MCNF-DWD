@@ -2,6 +2,7 @@
 from typing import Dict, Tuple, List
 
 import pandas as pd
+from docplex.mp.model import Model
 
 from domain.demand import Demand
 from domain.edge import Edge
@@ -21,7 +22,7 @@ class Network:
         self.edge_dict: Dict[Tuple[int, int], int] = {}  # map the pair of nodes' id to the edge's id
         self.bounded_edges: Dict[int, Edge] = {}  # 有容量上界的边
         self.solutions: List[Solution] = []  # The list of extreme solutions: 极点的列表（对应DW算法中的列）
-        self.obj_model = None
+        self.obj_model: Model = None
 
     def add_node(self, node_id: int):
         """

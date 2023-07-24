@@ -2,12 +2,12 @@
 import logging
 import time
 
-import cplex
-from cplex import SparsePair
+from docplex.mp.model import Model
 
 from algorithm.shortest_path import dijkstra
 from domain.network import Network
 from domain.solution import Solution
+from logger_config import LoggerStream
 
 logger = logging.getLogger(__name__)
 
@@ -18,27 +18,22 @@ def solve(network: Network, big_m=1e8, epsilon=1e-6):
         if edge.capacity < float('inf'):
             network.bounded_edges[edgeId] = edge
     # Initialization: 初始化模型
-    master_problem = cplex.Cplex()
+    master_problem = Model()
     # Add variables: 添加变量，包括lambda、松弛变量和人工变量
-    num_edges = len(network.bounded_edges)
-    s_index_range = master_problem.variables.add(obj=[big_m], lb=[0], names=['s'])
-
-    capacity_index_range = master_problem.linear_constraints.add(lin_expr=[SparsePair()] * num_edges,
-                                                                 senses=['L'] * num_edges,
-                                                                 rhs=[network.bounded_edges[k].capacity for k in network.bounded_edges.keys()])
-
-    usage_index_range = master_problem.linear_constraints.add(lin_expr=[SparsePair()],
-                                                              senses=['E'],
-                                                              rhs=[1])
-
-    master_problem.linear_constraints.set_coefficients(list(zip(usage_index_range, s_index_range, [1])))
+    slack = master_problem.continuous_var(lb=0, name='s')
+    capacity_cts = [master_problem.sum([]) <= network.bounded_edges[k].capacity for k in network.bounded_edges.keys()]
+    master_problem.add_constraints(capacity_cts)
+    usage_ct = slack == 1
+    master_problem.add_constraint(usage_ct)
+    obj = big_m * slack
+    master_problem.minimize(obj)
 
     start_time = time.time()
     iter_num = 0
     while True:
-        master_problem.solve()
+        master_problem.solve(log_output=LoggerStream())
 
-        dual_vars = master_problem.solution.get_dual_values()
+        dual_vars = master_problem.dual_values(capacity_cts) + master_problem.dual_values([usage_ct])
 
         solution = sub_problem(network, dual_vars)
 
@@ -46,19 +41,18 @@ def solve(network: Network, big_m=1e8, epsilon=1e-6):
 
         if solution.reduced_cost < -epsilon and iter_num < 2000:
             network.solutions.append(solution)
-            lamb_index_range = master_problem.variables.add(obj=[solution.cost], lb=[0], ub=[1],
-                                                            names=[f'lamb_{len(network.solutions) - 1}'])
-            coefficients = [solution.flow[k] for k in network.bounded_edges.keys()]
-            for lamb_index in lamb_index_range:
-                master_problem.linear_constraints.set_coefficients(list(zip(capacity_index_range, [lamb_index] * num_edges, coefficients)))
-            for lamb_index in lamb_index_range:
-                master_problem.linear_constraints.set_coefficients(list(zip(usage_index_range, [lamb_index], [1])))
+            lamb = master_problem.continuous_var(lb=0, name=f'lamb_{len(network.solutions) - 1}')
+            for i, k in enumerate(network.bounded_edges.keys()):
+                capacity_cts[i].lhs += solution.flow[k] * lamb
+            usage_ct.lhs += lamb
+            obj += solution.cost * lamb
+            master_problem.minimize(obj)
             iter_num += 1
         else:
             break
     end_time = time.time()
     network.obj_model = master_problem
-    logger.info("Iteration time: {:.2f}s. Objective: {:.2f}.".format(end_time - start_time, master_problem.solution.get_objective_value()))
+    logger.info("Iteration time: {:.2f}s. Objective: {:.2f}.".format(end_time - start_time, master_problem.objective_value))
     display_sol(network)
 
 
@@ -116,25 +110,21 @@ def display_sol(network: Network):
     """
     Process the final solution of the total model
     """
-    num_vars = network.obj_model.variables.get_num()
-    for i in range(num_vars):
-        var_name = network.obj_model.variables.get_names(i)
-        var_value = network.obj_model.solution.get_values(i)
+
+    # Obtain the lambda
+    lams = {}
+    for i in network.obj_model.iter_continuous_vars():
+        var_name = i.name
+        var_value = i.solution_value
+        if var_name.startswith("lamb"):
+            lam_idx = int(var_name[5:])
+            lams[lam_idx] = var_value
         if var_value > 0:
             logger.info(var_name + '\t' + str(var_value))
     # Reset capacity and weight of all edges
     network.reset_edge_capacity()
     network.reset_edge_weight()
-    # Obtain the lambda
-    lams = {}
 
-    num_vars = network.obj_model.variables.get_num()
-    for i in range(num_vars):
-        var_name = network.obj_model.variables.get_names(i)
-        var_value = network.obj_model.solution.get_values(i)
-        if len(var_name) > 3 and var_name[:3] == "lam":
-            lam_idx = int(var_name[5:])
-            lams[lam_idx] = var_value
     # For each demand, obtain its route(s) and the ratio of flow on the route according to lambda
     for sol_id, ratio in lams.items():
         solution = network.solutions[sol_id]

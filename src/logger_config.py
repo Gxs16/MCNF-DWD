@@ -56,7 +56,7 @@ log_config_dict = {
     'loggers': {
         'cplex-solver': {
             'handlers': ['to_console_only_msg', 'to_file_only_time'],
-            'level': 'DEBUG',
+            'level': 'INFO',
             'propagate': False,
         },
     },
@@ -72,5 +72,5 @@ class LoggerStream(io.IOBase):
         super().__init__()
 
     def write(self, __s: str) -> int:
-        logging.getLogger('cplex-solver').info(__s[:-1])
+        logging.getLogger('cplex-solver').debug(__s[:-1])
         return len(__s)
